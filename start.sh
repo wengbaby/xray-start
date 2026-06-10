@@ -41,7 +41,22 @@ if [ -z "$PUBLIC_HOST" ]; then
 fi
 
 # ==============================
-# 2. UUID
+# 2. 节点名称
+# ==============================
+
+NODE_NUM="${1:-}"
+
+if [ -n "$NODE_NUM" ]; then
+  NODE_NAME="US${NODE_NUM}-TOTAPP.COM"
+else
+  NODE_NAME="US-TOTAPP.COM"
+fi
+
+# 简单 URL 编码，避免节点名里有空格导致导入异常
+NODE_NAME_ENCODED="$(printf '%s' "$NODE_NAME" | sed 's/ /%20/g')"
+
+# ==============================
+# 3. UUID
 # ==============================
 
 UUID_FILE="$APP_DIR/uuid.txt"
@@ -59,7 +74,7 @@ fi
 UUID="$(cat "$UUID_FILE")"
 
 # ==============================
-# 3. 下载 Xray-core
+# 4. 下载 Xray-core
 # ==============================
 
 XRAY_BIN="$APP_DIR/xray"
@@ -106,7 +121,7 @@ if [ ! -f "$XRAY_BIN" ]; then
 fi
 
 # ==============================
-# 4. 生成 Xray 配置
+# 5. 生成 Xray 配置
 # ==============================
 
 cat > config.json <<JSON
@@ -146,16 +161,17 @@ cat > config.json <<JSON
 JSON
 
 # ==============================
-# 5. 输出节点信息
+# 6. 输出节点信息
 # ==============================
 
-VLESS_LINK="vless://${UUID}@${PUBLIC_HOST}:${PORT}?type=ws&security=none&path=%2Fvless#lunes-vless-ws"
+VLESS_LINK="vless://${UUID}@${PUBLIC_HOST}:${PORT}?type=ws&security=none&path=%2Fvless#${NODE_NAME_ENCODED}"
 
 clear 2>/dev/null || true
 
 echo "============================================================"
 echo " Xray VLESS WebSocket node is ready"
 echo "============================================================"
+echo "Node Name: ${NODE_NAME}"
 echo "Address: ${PUBLIC_HOST}"
 echo "Port: ${PORT}"
 echo "UUID: ${UUID}"
@@ -173,7 +189,7 @@ echo "Starting Xray..."
 echo ""
 
 # ==============================
-# 6. 启动 Xray
+# 7. 启动 Xray
 # ==============================
 
 exec "$XRAY_BIN" run -config "$APP_DIR/config.json"
