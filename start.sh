@@ -10,16 +10,20 @@ cd "$APP_DIR"
 # ==============================
 
 # 用法：
+# bash start.sh
 # bash start.sh 7
 # bash start.sh 7 CloudflareToken CloudflareZoneID
 #
-# 参数 1：节点编号，例如 7 => us7.totapp.com / US7-TOTAPP.COM
+# 参数 1：节点编号，可选
+#        不填 => us.totapp.com / US-TOTAPP.COM
+#        填 7 => us7.totapp.com / US7-TOTAPP.COM
+#
 # 参数 2：Cloudflare API Token，可选
 # 参数 3：Cloudflare Zone ID，可选
 #
 # 如果不传 CloudflareToken 和 ZoneID：
 # - 不更新 Cloudflare
-# - 节点链接使用服务器 IP
+# - 节点链接仍然使用域名
 #
 # 如果传了 CloudflareToken 和 ZoneID：
 # - 自动更新 us数字.totapp.com 的 A 记录
@@ -36,7 +40,7 @@ if [ -n "$NODE_NUM" ]; then
   DNS_NAME="us${NODE_NUM}.${ROOT_DOMAIN}"
 else
   NODE_NAME="US-TOTAPP.COM"
-  DNS_NAME=""
+  DNS_NAME="us.${ROOT_DOMAIN}"
 fi
 
 NODE_NAME_ENCODED="$(printf '%s' "$NODE_NAME" | sed 's/ /%20/g')"
@@ -56,7 +60,7 @@ fi
 
 PORT="${SERVER_PORT}"
 
-# 地址：优先使用面板注入的 SERVER_IP
+# IP：优先使用面板注入的 SERVER_IP
 PUBLIC_IP="${SERVER_IP:-}"
 
 # 如果 SERVER_IP 不存在，则尝试获取公网 IPv4
@@ -76,8 +80,8 @@ if [ -z "$PUBLIC_IP" ]; then
   exit 1
 fi
 
-# 默认节点地址使用 IP
-PUBLIC_HOST="${PUBLIC_IP}"
+# vless 链接始终使用域名，不使用 IP
+PUBLIC_HOST="${DNS_NAME}"
 
 # ==============================
 # 2. Cloudflare DNS 自动更新
@@ -85,7 +89,7 @@ PUBLIC_HOST="${PUBLIC_IP}"
 
 CF_DNS_STATUS="skipped"
 
-if [ -n "$DNS_NAME" ] && [ -n "$CF_TOKEN" ] && [ -n "$CF_ZONE_ID" ]; then
+if [ -n "$CF_TOKEN" ] && [ -n "$CF_ZONE_ID" ]; then
   if ! command -v curl >/dev/null 2>&1; then
     echo "WARNING: curl not found, skip Cloudflare DNS update."
     CF_DNS_STATUS="skipped: curl not found"
@@ -111,21 +115,17 @@ if [ -n "$DNS_NAME" ] && [ -n "$CF_TOKEN" ] && [ -n "$CF_ZONE_ID" ]; then
 
     if echo "$CF_RESULT" | grep -q '"success":true'; then
       echo "Cloudflare DNS updated successfully."
-      PUBLIC_HOST="${DNS_NAME}"
       CF_DNS_STATUS="updated"
     else
       echo "WARNING: Cloudflare DNS update failed."
       echo "$CF_RESULT"
-      echo "Continue with IP address: ${PUBLIC_IP}"
-      PUBLIC_HOST="${PUBLIC_IP}"
+      echo "Continue with domain address: ${DNS_NAME}"
       CF_DNS_STATUS="failed"
     fi
   fi
 else
-  if [ -n "$DNS_NAME" ]; then
-    echo "CloudflareToken or ZoneID not provided, skip Cloudflare DNS update."
-    echo "Using IP address in node link: ${PUBLIC_IP}"
-  fi
+  echo "CloudflareToken or ZoneID not provided, skip Cloudflare DNS update."
+  echo "Using domain address in node link: ${DNS_NAME}"
 fi
 
 # ==============================
@@ -255,11 +255,7 @@ echo "WS Path: /vless"
 echo "TLS: none"
 echo "Security: none"
 echo "Cloudflare DNS: ${CF_DNS_STATUS}"
-
-if [ -n "$DNS_NAME" ]; then
-  echo "DNS Name: ${DNS_NAME}"
-fi
-
+echo "DNS Name: ${DNS_NAME}"
 echo ""
 echo "v2rayN node link:"
 echo "${VLESS_LINK}"
