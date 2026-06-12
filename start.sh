@@ -6,6 +6,42 @@ mkdir -p "$APP_DIR"
 cd "$APP_DIR"
 
 # ==============================
+# 0. 启动参数
+# ==============================
+
+# 用法：
+# bash start.sh 7
+# bash start.sh 7 CloudflareToken CloudflareZoneID
+#
+# 参数 1：节点编号，例如 7 => us7.totapp.com / US7-TOTAPP.COM
+# 参数 2：Cloudflare API Token，可选
+# 参数 3：Cloudflare Zone ID，可选
+#
+# 如果不传 CloudflareToken 和 ZoneID：
+# - 不更新 Cloudflare
+# - 节点链接使用服务器 IP
+#
+# 如果传了 CloudflareToken 和 ZoneID：
+# - 自动更新 us数字.totapp.com 的 A 记录
+# - 节点链接使用 us数字.totapp.com
+
+NODE_NUM="${1:-}"
+CF_TOKEN="${2:-${CF_API_TOKEN:-}}"
+CF_ZONE_ID="${3:-${CF_ZONE_ID:-}}"
+
+ROOT_DOMAIN="totapp.com"
+
+if [ -n "$NODE_NUM" ]; then
+  NODE_NAME="US${NODE_NUM}-TOTAPP.COM"
+  DNS_NAME="us${NODE_NUM}.${ROOT_DOMAIN}"
+else
+  NODE_NAME="US-TOTAPP.COM"
+  DNS_NAME=""
+fi
+
+NODE_NAME_ENCODED="$(printf '%s' "$NODE_NAME" | sed 's/ /%20/g')"
+
+# ==============================
 # 1. 自动获取地址和端口
 # ==============================
 
@@ -21,18 +57,18 @@ fi
 PORT="${SERVER_PORT}"
 
 # 地址：优先使用面板注入的 SERVER_IP
-PUBLIC_HOST="${SERVER_IP:-}"
+PUBLIC_IP="${SERVER_IP:-}"
 
 # 如果 SERVER_IP 不存在，则尝试获取公网 IPv4
-if [ -z "$PUBLIC_HOST" ]; then
+if [ -z "$PUBLIC_IP" ]; then
   if command -v curl >/dev/null 2>&1; then
-    PUBLIC_HOST="$(curl -4 -s --max-time 5 https://api.ipify.org || true)"
+    PUBLIC_IP="$(curl -4 -s --max-time 5 https://api.ipify.org || true)"
   elif command -v wget >/dev/null 2>&1; then
-    PUBLIC_HOST="$(wget -qO- -T 5 https://api.ipify.org || true)"
+    PUBLIC_IP="$(wget -qO- -T 5 https://api.ipify.org || true)"
   fi
 fi
 
-if [ -z "$PUBLIC_HOST" ]; then
+if [ -z "$PUBLIC_IP" ]; then
   echo "ERROR: Public IP not found."
   echo "Please check SERVER_IP or network access."
   echo "Run this command to inspect:"
@@ -40,20 +76,57 @@ if [ -z "$PUBLIC_HOST" ]; then
   exit 1
 fi
 
+# 默认节点地址使用 IP
+PUBLIC_HOST="${PUBLIC_IP}"
+
 # ==============================
-# 2. 节点名称
+# 2. Cloudflare DNS 自动更新
 # ==============================
 
-NODE_NUM="${1:-}"
+CF_DNS_STATUS="skipped"
 
-if [ -n "$NODE_NUM" ]; then
-  NODE_NAME="US${NODE_NUM}-TOTAPP.COM"
+if [ -n "$DNS_NAME" ] && [ -n "$CF_TOKEN" ] && [ -n "$CF_ZONE_ID" ]; then
+  if ! command -v curl >/dev/null 2>&1; then
+    echo "WARNING: curl not found, skip Cloudflare DNS update."
+    CF_DNS_STATUS="skipped: curl not found"
+  else
+    echo "Updating Cloudflare DNS: ${DNS_NAME} -> ${PUBLIC_IP}"
+
+    RECORD_ID="$(curl -s -X GET "https://api.cloudflare.com/client/v4/zones/${CF_ZONE_ID}/dns_records?type=A&name=${DNS_NAME}" \
+      -H "Authorization: Bearer ${CF_TOKEN}" \
+      -H "Content-Type: application/json" \
+      | sed -n 's/.*"id":"\([^"]*\)".*/\1/p' | head -n 1)"
+
+    if [ -n "$RECORD_ID" ]; then
+      CF_RESULT="$(curl -s -X PUT "https://api.cloudflare.com/client/v4/zones/${CF_ZONE_ID}/dns_records/${RECORD_ID}" \
+        -H "Authorization: Bearer ${CF_TOKEN}" \
+        -H "Content-Type: application/json" \
+        --data "{\"type\":\"A\",\"name\":\"${DNS_NAME}\",\"content\":\"${PUBLIC_IP}\",\"ttl\":60,\"proxied\":false}")"
+    else
+      CF_RESULT="$(curl -s -X POST "https://api.cloudflare.com/client/v4/zones/${CF_ZONE_ID}/dns_records" \
+        -H "Authorization: Bearer ${CF_TOKEN}" \
+        -H "Content-Type: application/json" \
+        --data "{\"type\":\"A\",\"name\":\"${DNS_NAME}\",\"content\":\"${PUBLIC_IP}\",\"ttl\":60,\"proxied\":false}")"
+    fi
+
+    if echo "$CF_RESULT" | grep -q '"success":true'; then
+      echo "Cloudflare DNS updated successfully."
+      PUBLIC_HOST="${DNS_NAME}"
+      CF_DNS_STATUS="updated"
+    else
+      echo "WARNING: Cloudflare DNS update failed."
+      echo "$CF_RESULT"
+      echo "Continue with IP address: ${PUBLIC_IP}"
+      PUBLIC_HOST="${PUBLIC_IP}"
+      CF_DNS_STATUS="failed"
+    fi
+  fi
 else
-  NODE_NAME="US-TOTAPP.COM"
+  if [ -n "$DNS_NAME" ]; then
+    echo "CloudflareToken or ZoneID not provided, skip Cloudflare DNS update."
+    echo "Using IP address in node link: ${PUBLIC_IP}"
+  fi
 fi
-
-# 简单 URL 编码，避免节点名里有空格导致导入异常
-NODE_NAME_ENCODED="$(printf '%s' "$NODE_NAME" | sed 's/ /%20/g')"
 
 # ==============================
 # 3. UUID
@@ -172,6 +245,7 @@ echo "============================================================"
 echo " Xray VLESS WebSocket node is ready"
 echo "============================================================"
 echo "Node Name: ${NODE_NAME}"
+echo "Server IP: ${PUBLIC_IP}"
 echo "Address: ${PUBLIC_HOST}"
 echo "Port: ${PORT}"
 echo "UUID: ${UUID}"
@@ -180,6 +254,12 @@ echo "Transport: WebSocket"
 echo "WS Path: /vless"
 echo "TLS: none"
 echo "Security: none"
+echo "Cloudflare DNS: ${CF_DNS_STATUS}"
+
+if [ -n "$DNS_NAME" ]; then
+  echo "DNS Name: ${DNS_NAME}"
+fi
+
 echo ""
 echo "v2rayN node link:"
 echo "${VLESS_LINK}"
