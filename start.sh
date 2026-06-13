@@ -180,11 +180,11 @@ if [ ! -f "$XRAY_BIN" ]; then
   fi
 
   if command -v unzip >/dev/null 2>&1; then
-    unzip -o xray.zip
+    unzip -o xray.zip >/dev/null 2>&1
   elif command -v python3 >/dev/null 2>&1; then
-    python3 -m zipfile -e xray.zip .
+    python3 -m zipfile -e xray.zip . >/dev/null 2>&1
   elif command -v python >/dev/null 2>&1; then
-    python -m zipfile -e xray.zip .
+    python -m zipfile -e xray.zip . >/dev/null 2>&1
   else
     echo "ERROR: unzip, python3 or python is required to extract xray.zip."
     exit 1
@@ -200,7 +200,9 @@ fi
 cat > config.json <<JSON
 {
   "log": {
-    "loglevel": "warning"
+    "access": "none",
+    "error": "none",
+    "loglevel": "none"
   },
   "inbounds": [
     {
@@ -261,11 +263,11 @@ echo "v2rayN node link:"
 echo "${VLESS_LINK}"
 echo "============================================================"
 echo ""
-echo "Starting Xray..."
+echo "Starting Xray in quiet mode..."
 echo ""
 
 # ==============================
-# 7. 启动 Xray
+# 7. 启动 Xray 静默模式
 # ==============================
 
-exec "$XRAY_BIN" run -config "$APP_DIR/config.json"
+exec "$XRAY_BIN" run -config "$APP_DIR/config.json" >/dev/null 2>&1
